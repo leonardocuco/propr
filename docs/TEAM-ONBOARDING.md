@@ -32,8 +32,9 @@ PROPR_SKIP_REMOTE_IMAGE_CHECK=1 node packages/cli/dist/index.js setup --root ~/D
 
 - GitHub authentication → **Personal access tokens**. The wizard prints two
   pre-filled fine-grained PAT URLs (permissions and expiry already selected):
-  pick the repositories, generate, paste. Classic `ghp_` tokens are rejected
-  (they cannot be read-only).
+  pick the repositories, generate, paste. The wizard warns on classic `ghp_`
+  tokens but still accepts them — they cannot be read-only, so always use
+  fine-grained `github_pat_` tokens.
 - Browser sign-in → create the shared OAuth App from the printed pre-filled
   link (callback `http://localhost:4000/api/auth/github/callback`), paste the
   Client ID + Secret. One OAuth App per team: everyone shares the same

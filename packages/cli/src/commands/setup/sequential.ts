@@ -23,8 +23,6 @@ import { createGithubApp, hasGithubAppCredentials, openGithubAppBrowser } from "
  */
 
 import { createInterface } from "node:readline/promises";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { DEFAULT_PROPR_GH_RELAY_URL, githubAppPublicUrl, type GithubAuthMode } from "@propr/shared";
 import type { AuthorizedInstallation } from "../../api/relay.js";
 import {
@@ -45,6 +43,7 @@ import {
   type SetupRunResult,
 } from "./engine.js";
 import type { SetupStepStatus } from "./types.js";
+import { readOAuthAppSetup } from "./oauthAppSetup.js";
 
 // ---------------------------------------------------------------------------
 // I/O seam.
@@ -398,30 +397,16 @@ export function buildSequentialPrompts(io: SequentialIo, paint: Paint = makePain
         // only: the CLI/API operate with the PATs). Identity-only scopes keep
         // restricted organizations out of the flow — no admin approval.
         // Pre-fill GitHub's creation form (name, homepage, callback).
-        let apiPort = "4000";
-        try {
-            const envText = readFileSync(join(rootDir ?? "", ".env"), "utf-8");
-            apiPort = envText.match(/^DASHBOARD_API_PORT=(\S+)/m)?.[1] || apiPort;
-        } catch { /* fresh install: .env may not exist yet; keep the default port */ }
-        const oauthCallback = `http://localhost:${apiPort}/api/auth/github/callback`;
-        const oauthAppUrl = "https://github.com/settings/applications/new"
-            + `?name=${encodeURIComponent("ProPR (local)")}`
-            + `&url=${encodeURIComponent("http://localhost:5173")}`
-            + `&callback_url=${encodeURIComponent(oauthCallback)}`;
+        const oauthSetup = readOAuthAppSetup(rootDir);
         io.print("");
         io.print("  Browser sign-in for the dashboard needs a GitHub OAuth App (identity only, no org access):");
-        io.print(`  Create it (form pre-filled): ${oauthAppUrl}`);
+        io.print(`  Create it (form pre-filled): ${oauthSetup.creationUrl}`);
         io.print("  Then generate a client secret on the app page. Shared installs: one app per team is enough.");
         const oauthClientId = (await io.ask("  GH_OAUTH_CLIENT_ID (blank = skip browser sign-in): ")).trim();
         let oauthVars: Record<string, string> = {};
         if (oauthClientId) {
             const oauthClientSecret = await io.ask("  GH_OAUTH_CLIENT_SECRET: ", { mask: true });
-            oauthVars = {
-                GH_OAUTH_CLIENT_ID: oauthClientId,
-                GH_OAUTH_CLIENT_SECRET: oauthClientSecret,
-                GH_OAUTH_CALLBACK_URL: oauthCallback,
-                FRONTEND_URL: "http://localhost:5173",
-            };
+            oauthVars = oauthSetup.envVars(oauthClientId, oauthClientSecret);
         } else {
             io.print("  Skipped: the dashboard will show 'Browser sign-in is not configured' until an OAuth App is set.");
         }

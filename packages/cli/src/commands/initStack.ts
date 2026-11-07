@@ -55,14 +55,62 @@ export function materializePackagedRuntimeMode(template: string): string {
  * automation report/action run fail at grant time with
  * "SYSTEM_TASK_SECRET is not configured on the worker", long after setup
  * succeeded. Fill it when absent or empty; never overwrite a configured value.
+ *
+ * Covers every shape an upgraded stack can present:
+ * - an existing but empty line (plain, whitespace-padded, quoted-empty, CRLF)
+ * - a template with no SYSTEM_TASK_SECRET line at all (appended at the end)
  */
 export function materializeSystemTaskSecret(
   content: string,
   secret: string = randomBytes(32).toString("hex"),
 ): string {
-  const linePattern = /^SYSTEM_TASK_SECRET=[ \t]*$/m;
-  if (!linePattern.test(content)) return content;
-  return content.replace(linePattern, `SYSTEM_TASK_SECRET=${secret}`);
+  const emptyLinePattern = /^SYSTEM_TASK_SECRET=(?:[ \t]*(?:["'][ \t]*["'])?)[ \t]*\r?$/m;
+  if (emptyLinePattern.test(content)) {
+    return content.replace(emptyLinePattern, `SYSTEM_TASK_SECRET=${secret}`);
+  }
+  if (!/^SYSTEM_TASK_SECRET=/m.test(content)) {
+    const separator = content.length === 0 || content.endsWith("\n") ? "" : "\n";
+    return `${content}${separator}SYSTEM_TASK_SECRET=${secret}\n`;
+  }
+  return content;
+}
+
+/**
+ * Reads the value assigned to `key` in .env content, stripping surrounding
+ * quotes and whitespace. Returns `undefined` when the key is absent or empty.
+ */
+function extractEnvValue(content: string, key: string): string | undefined {
+  const match = content.match(new RegExp(`^${key}=(.*)$`, "m"));
+  if (!match) return undefined;
+  return match[1].trim().replace(/^["']+|["']+$/g, "").trim() || undefined;
+}
+
+/**
+ * Pins the credential-encryption root before SYSTEM_TASK_SECRET can become it.
+ *
+ * Both credential crypto chains derive their key from
+ * `PROPR_CREDENTIAL_ENCRYPTION_KEY || SYSTEM_TASK_SECRET || SESSION_SECRET`.
+ * Seeding an empty SYSTEM_TASK_SECRET in a preserved .env therefore silently
+ * rotates the effective key: every OAuth grant or profile secret previously
+ * sealed under SESSION_SECRET would become permanently undecryptable. When no
+ * explicit encryption key is configured, pin PROPR_CREDENTIAL_ENCRYPTION_KEY to
+ * the previous effective value so existing ciphertext stays readable. When
+ * SESSION_SECRET is also empty there is nothing to preserve (the chain would
+ * have thrown on first use), so the content is returned unchanged.
+ */
+export function pinCredentialEncryptionKey(content: string): string {
+  if (extractEnvValue(content, "PROPR_CREDENTIAL_ENCRYPTION_KEY")) return content;
+  const previousEffectiveKey = extractEnvValue(content, "SESSION_SECRET");
+  if (!previousEffectiveKey) return content;
+  const linePattern = /^PROPR_CREDENTIAL_ENCRYPTION_KEY=[ \t]*\r?$/m;
+  if (linePattern.test(content)) {
+    return content.replace(linePattern, `PROPR_CREDENTIAL_ENCRYPTION_KEY=${previousEffectiveKey}`);
+  }
+  if (!/^PROPR_CREDENTIAL_ENCRYPTION_KEY=/m.test(content)) {
+    const separator = content.length === 0 || content.endsWith("\n") ? "" : "\n";
+    return `${content}${separator}PROPR_CREDENTIAL_ENCRYPTION_KEY=${previousEffectiveKey}\n`;
+  }
+  return content;
 }
 
 export interface DetectedCred {
@@ -216,11 +264,19 @@ export async function scaffoldStack(
   const envExists = existsSync(envPath);
   let envContent: string;
   let shouldWriteEnv = false;
-  if (envExists && !options.force) {
+  // A pre-existing .env is user-managed: the only permitted in-place edit is
+  // seeding an empty SYSTEM_TASK_SECRET (with its encryption-key pin), and only
+  // after a .bak backup. Everything else (HOST_* entries) is collected but not
+  // written.
+  const preservedEnv = envExists && !options.force;
+  let seededPreservedEnv = false;
+  if (preservedEnv) {
     await secureExistingPrivateFile(envPath);
-    envContent = materializeSystemTaskSecret(readFileSync(envPath, "utf-8"));
-    if (envContent !== readFileSync(envPath, "utf-8")) {
-      shouldWriteEnv = true;
+    const original = readFileSync(envPath, "utf-8");
+    envContent = materializeSystemTaskSecret(original);
+    if (envContent !== original) {
+      envContent = pinCredentialEncryptionKey(envContent);
+      seededPreservedEnv = true;
       result.systemTaskSecretGenerated = true;
     } else {
       result.envSkipped = true;
@@ -264,7 +320,7 @@ export async function scaffoldStack(
     const re = new RegExp(`^\\s*(export\\s+)?${c.envKey}\\s*=`, "m");
     return !re.test(envContent);
   });
-  if (toAppend.length > 0 && !result.envSkipped) {
+  if (toAppend.length > 0 && !preservedEnv) {
     const block =
       "\n# --- Host agent-credential directories (detected by `propr init stack`) ---\n" +
       toAppend.map((c) => `${c.envKey}=${c.path}`).join("\n") +
@@ -277,9 +333,16 @@ export async function scaffoldStack(
   result.detected = detected;
   result.pendingCredentials = toAppend;
 
-  if (shouldWriteEnv) {
+  if (shouldWriteEnv || seededPreservedEnv) {
+    if (seededPreservedEnv) {
+      // The preserved .env is user-managed: never mutate it without a backup.
+      await secureExistingPrivateFile(envPath);
+      const bakPath = `${envPath}.bak`;
+      await writePrivateFileAtomic(bakPath, readFileSync(envPath), { secureParent: false });
+      result.envBackedUp = true;
+    }
     await writePrivateFileAtomic(envPath, envContent, { secureParent: false });
-    result.envCreated = true;
+    result.envCreated = !preservedEnv;
   }
   // 3b. When Vibe is in play, pre-create its prompt-cache dir so spawned Vibe
   //     agent containers can bind-mount a writable host directory. Creating it
@@ -313,6 +376,9 @@ function displayResult(result: InitStackResult): void {
     console.log("Overwrote .env from .env.example (previous saved to .env.bak)");
   } else if (result.envCreated) {
     console.log("Created .env from .env.example");
+  } else if (result.systemTaskSecretGenerated) {
+    console.log("Seeded an empty SYSTEM_TASK_SECRET in the existing .env (previous saved to .env.bak)");
+    console.log("The credential-encryption key was pinned so previously sealed secrets stay readable.");
   } else if (result.envSkipped) {
     console.log("Kept existing .env (use --force to overwrite)");
   }

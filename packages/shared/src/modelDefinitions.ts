@@ -133,9 +133,13 @@ export const VIBE_MODELS: ModelInfo[] = [
 // All models combined
 export const ALL_MODELS: ModelInfo[] = [...CLAUDE_MODELS, ...ENABLERS_MODELS, ...CODEX_MODELS, ...ANTIGRAVITY_MODELS, ...OPENCODE_MODELS, ...VIBE_MODELS];
 
-// Map of agent types to their models
+// Map of agent types to their models. The Enablers gateway ids are served by
+// claude-type agents (an Enablers-routed Claude config), so they belong to the
+// claude family for attribution, UI pickers and label building. They
+// deliberately stay OUT of AGENT_DEFAULTS.claude.defaultModels below: default
+// model injection must never add ids a native Anthropic endpoint rejects.
 export const AGENT_MODELS: Record<AgentType, ModelInfo[]> = {
-  claude: CLAUDE_MODELS,
+  claude: [...CLAUDE_MODELS, ...ENABLERS_MODELS],
   codex: CODEX_MODELS,
   antigravity: ANTIGRAVITY_MODELS,
   opencode: OPENCODE_MODELS,
