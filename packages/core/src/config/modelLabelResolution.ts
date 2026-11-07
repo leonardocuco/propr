@@ -94,7 +94,14 @@ function resolveByGithubLabel(fullLabel: string, agents: { config: AgentConfig }
     for (const modelInfo of ALL_MODELS) {
         if (modelInfo.githubLabel.toLowerCase() === fullLabel) {
             const agentType = getAgentTypeFromModel(modelInfo.id);
-            const agent = findAgentByType(agentType, agents);
+            // Multiple instances of one agent type may exist (e.g. a native
+            // claude agent plus an Enablers-routed one). Prefer an enabled
+            // agent that actually lists the model in its supportedModels;
+            // fall back to the first agent of the type otherwise.
+            const supportingAgent = agents.find(a => a.config.enabled
+                && Array.isArray(a.config.supportedModels)
+                && a.config.supportedModels.some(m => m.toLowerCase() === modelInfo.id.toLowerCase()));
+            const agent = supportingAgent || findAgentByType(agentType, agents);
             return { agentAlias: agent?.config.alias || agentType, model: modelInfo.id };
         }
     }
