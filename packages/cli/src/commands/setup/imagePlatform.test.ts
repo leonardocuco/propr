@@ -12,7 +12,9 @@ test('selects actual manifest platforms and keeps the agent explicitly AMD64', (
   assert.equal(selectSetupImagePlatform(platforms, 'aarch64', false), 'linux/arm64');
   assert.equal(selectSetupImagePlatform(platforms, 'aarch64', true), 'linux/amd64');
   assert.equal(selectSetupImagePlatform(platforms, 'x86_64', false), 'linux/amd64');
-  assert.throws(() => selectSetupImagePlatform(['linux/amd64'], 'arm64', false), /required linux\/arm64/);
+  // Fork policy: an ARM64 engine falls back to the published AMD64 core image
+  // under emulation instead of failing setup (upstream hard-fails here).
+  assert.equal(selectSetupImagePlatform(['linux/amd64'], 'arm64', false), 'linux/amd64');
   assert.throws(() => selectSetupImagePlatform(['linux/arm64'], 'arm64', true), /required linux\/amd64/);
   assert.throws(() => selectSetupImagePlatform(platforms, 's390x', false), /Unsupported/);
 });
@@ -43,4 +45,22 @@ test('platform inspection stops at awaited cancellation boundaries', async () =>
     await assert.rejects(inspectSetupImagePlatform(orch, 'local/app', false, true, controller.signal), { name: 'AbortError' });
     assert.deepEqual(calls, abortOn === 'info' ? ['info'] : ['info', 'image']);
   }
+});
+
+test('arm64 engine falls back to the published amd64 core image when no arm64 variant exists', () => {
+    assert.equal(selectSetupImagePlatform(['linux/amd64'], 'aarch64', false), 'linux/amd64');
+});
+
+test('arm64 engine still prefers a native arm64 core image when declared', () => {
+    assert.equal(selectSetupImagePlatform(['linux/amd64', 'linux/arm64'], 'aarch64', false), 'linux/arm64');
+});
+
+test('agent images keep the strict amd64 requirement on arm64 engines', () => {
+    assert.throws(() => selectSetupImagePlatform(['linux/arm64'], 'aarch64', true));
+    assert.equal(selectSetupImagePlatform(['linux/amd64'], 'aarch64', true), 'linux/amd64');
+});
+
+test('amd64 engine is unaffected by the fallback', () => {
+    assert.equal(selectSetupImagePlatform(['linux/amd64'], 'x86_64', false), 'linux/amd64');
+    assert.throws(() => selectSetupImagePlatform(['linux/arm64'], 'x86_64', false));
 });
