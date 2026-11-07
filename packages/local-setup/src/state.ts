@@ -354,6 +354,8 @@ export function detectGithubAuthMode(rootDir: string): GithubAuthModeResult {
     // `propr setup` would resolve as "none" despite being fully set up.
     privateKeyPath: env.GH_PRIVATE_KEY_PATH ?? env.HOST_GH_PRIVATE_KEY,
     installationId: env.GH_INSTALLATION_ID,
+    patToken: env.GH_PAT_TOKEN,
+    patReadToken: env.GH_PAT_READ_TOKEN,
   });
 }
 

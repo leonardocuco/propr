@@ -379,9 +379,22 @@ export function buildSequentialPrompts(io: SequentialIo, paint: Paint = makePain
         if (patReadToken && !patReadToken.startsWith("github_pat_")) {
             io.print("  WARNING: the read token should be fine-grained (github_pat_...); classic tokens always carry write.");
         }
+        // Seed the instance administrator from the authenticated gh CLI login,
+        // mirroring what relay enrollment does for the shared App.
+        let adminUser = "";
+        try {
+            adminUser = (await io.ask("  GitHub username to seed as instance administrator (blank = detect via gh): ", { mask: false })).trim();
+            if (!adminUser) {
+                const { execFileSync } = await import("node:child_process");
+                adminUser = execFileSync("gh", ["api", "user", "--jq", ".login"], { encoding: "utf8" }).trim();
+                io.print(`  Detected administrator: ${adminUser}`);
+            }
+        } catch {
+            adminUser = await io.ask("  Could not detect via gh. GitHub username for the instance administrator: ");
+        }
         return {
           mode: "pat" satisfies GithubAuthMode,
-          vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken },
+          vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken, ...(adminUser ? { PROPR_ADMIN_USERS: adminUser } : {}) },
         };
       }
       const method = await promptSelect(io, paint, {

@@ -25,7 +25,15 @@ export function selectSetupImagePlatform(platforms: readonly string[], architect
   if (!native) throw new Error(`Unsupported Docker engine architecture: ${architecture}`);
   // The released agent is AMD64. Its ARM64 compatibility must be independently
   // qualified before changing this policy. Docker Desktop supplies emulation.
-  const selected = agent ? 'linux/amd64' : native;
+  // Core images: the published propr/app and propr/ui are AMD64-only while the
+  // ARM64 images are not yet qualified, so on ARM64 engines fall back to the
+  // published AMD64 variant under emulation (the documented Apple Silicon path)
+  // instead of failing the whole setup. Agent images keep the strict AMD64
+  // requirement.
+  let selected = agent ? 'linux/amd64' : native;
+  if (!agent && selected === 'linux/arm64' && !platforms.includes('linux/arm64') && platforms.includes('linux/amd64')) {
+    selected = 'linux/amd64';
+  }
   if (!platforms.includes(selected)) throw new Error(agent
     ? 'Image does not declare the required linux/amd64 platform. ARM64 agent images, including source builds, are not yet qualified; build or select an AMD64 agent image.'
     : `Image does not declare the required ${selected} platform`);
