@@ -288,7 +288,17 @@ export function createOAuthStartHandler(browserAuthMode: BrowserAuthMode, demoMo
             redirectAuthError(res, 'web_auth_not_configured');
             return;
         }
-        passport.authenticate('github', { scope: ['user:email', 'read:org', 'repo'] })(req, res, next);
+        // In PAT mode the backend operates with the configured personal access
+        // tokens, so the browser session only needs identity (user:email).
+        // Requesting repo/read:org scopes there triggers the org's
+        // third-party-app approval flow ("Request" button) for restricted
+        // organizations, which defeats the zero-admin goal of PAT mode. All
+        // other auth modes keep the upstream scopes: their session token also
+        // browses repositories/orgs.
+        const scopes = process.env.GH_AUTH_MODE === 'pat'
+            ? ['user:email']
+            : ['user:email', 'read:org', 'repo'];
+        passport.authenticate('github', { scope: scopes })(req, res, next);
     };
 }
 
