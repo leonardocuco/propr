@@ -1,9 +1,30 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { ENABLERS_MODELS, CLAUDE_MODELS } from '@propr/shared';
-import { resolveLlmLabel } from '../src/config/modelLabelResolution.js';
-import { AgentRegistry } from '../src/agents/AgentRegistry.js';
+import { mock, test } from 'node:test';
 import type { AgentConfig } from '../src/agents/types.js';
+
+// AgentRegistry must be mocked before importing the module under test:
+// the real registry's import chain evaluates the GitHub auth configuration,
+// which calls process.exit(1) when no auth is configured (the state every
+// unit test runs in).
+let agents: AgentLike[] = [];
+let defaultAgent: AgentLike | undefined;
+
+await mock.module('../src/agents/AgentRegistry.js', {
+  namedExports: {
+    AgentRegistry: class {
+      static getInstance() {
+        return {
+          ensureInitialized: async () => {},
+          getAllAgents: () => agents,
+          getDefaultAgent: () => defaultAgent,
+        };
+      }
+    },
+  },
+});
+
+const { ENABLERS_MODELS, CLAUDE_MODELS } = await import('@propr/shared');
+const { resolveLlmLabel } = await import('../src/config/modelLabelResolution.js');
 
 interface AgentLike {
     config: AgentConfig;
@@ -17,23 +38,15 @@ function claudeConfig(overrides: Partial<AgentConfig> & { alias: string; support
     } as AgentConfig;
 }
 
-function withAgents(agents: AgentLike[], defaultAgent?: AgentLike): void {
-    const registry = AgentRegistry.getInstance() as unknown as {
-        initialized: boolean;
-        ensureInitialized(): Promise<void>;
-        getAllAgents(): AgentLike[];
-        getDefaultAgent(): AgentLike | undefined;
-    };
-    registry.initialized = true;
-    registry.ensureInitialized = async () => undefined;
-    registry.getAllAgents = () => agents;
-    registry.getDefaultAgent = () => defaultAgent;
+function withAgents(nextAgents: AgentLike[], nextDefaultAgent?: AgentLike): void {
+    agents = nextAgents;
+    defaultAgent = nextDefaultAgent;
 }
 
 test('Enablers github labels resolve to the enabled claude-type agent that lists the model', async () => {
     const native = claudeConfig({ alias: 'claude', supportedModels: CLAUDE_MODELS.map(m => m.id) });
     const enablers = claudeConfig({ alias: 'claude-enablers', supportedModels: ENABLERS_MODELS.map(m => m.id) });
-    withAgents([native, enablers]);
+    withAgents([{ config: native }, { config: enablers }]);
 
     for (const model of ENABLERS_MODELS) {
         const label = model.githubLabel.replace(/^llm-/, '');
@@ -60,7 +73,7 @@ test('a disabled listing agent resolves to no serving agent instead of the nativ
         enabled: false,
         supportedModels: ENABLERS_MODELS.map(m => m.id),
     });
-    withAgents([native, disabledEnablers], native);
+    withAgents([{ config: native }, { config: disabledEnablers }], { config: native });
 
     const resolution = await resolveLlmLabel('enablers-xl');
     // The native claude agent's config cannot serve the id; the resolution must
@@ -71,7 +84,7 @@ test('a disabled listing agent resolves to no serving agent instead of the nativ
 
 test('dynamic per-alias labels for Enablers models resolve through the explicit agent:model path', async () => {
     const enablers = claudeConfig({ alias: 'claude-enablers', supportedModels: ENABLERS_MODELS.map(m => m.id) });
-    withAgents([enablers]);
+    withAgents([{ config: enablers }]);
 
     // buildAgentModelLlmLabel('claude', 'claude-enablers', enablers/large)
     // produces this dynamic label form (alias~modelId).

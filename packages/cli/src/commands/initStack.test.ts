@@ -39,7 +39,14 @@ test("stack scaffolding tightens existing secrets and local state directories", 
       { persistStackRoot: async value => { persistedRoot = value; } },
     );
 
-    assert.equal(result.envSkipped, true);
+    // The .env has no SYSTEM_TASK_SECRET line, so it is seeded in place
+    // (with a .bak backup) while staying otherwise user-managed.
+    assert.equal(result.systemTaskSecretGenerated, true);
+    assert.equal(result.envCreated, false);
+    assert.equal(result.envBackedUp, true);
+    assert.equal(existsSync(join(root, ".env.bak")), true);
+    assert.match(readFileSync(join(root, ".env"), "utf-8"), /^SESSION_SECRET=secret$/m);
+    assert.match(readFileSync(join(root, ".env"), "utf-8"), /^SYSTEM_TASK_SECRET=[0-9a-f]{64}$/m);
     assert.equal(persistedRoot, root);
     assert.equal(mode(root), 0o700);
     assert.equal(mode(join(root, ".env")), 0o600);
