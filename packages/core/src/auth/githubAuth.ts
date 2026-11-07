@@ -23,6 +23,12 @@ interface InstallationAuth {
 const appId = process.env.GH_APP_ID;
 const privateKeyPath = process.env.GH_PRIVATE_KEY_PATH;
 const installationId = process.env.GH_INSTALLATION_ID;
+// PAT mode: two fine-grained Personal Access Tokens. The worker token carries
+// the write grants (push, PRs, labels, comments); the read token is the only
+// credential handed to agent containers, mirroring the read-only scoping of
+// installation sub-tokens in relay/app modes.
+const patToken = process.env.GH_PAT_TOKEN;
+const patReadToken = process.env.GH_PAT_READ_TOKEN;
 const demoMode = parseTruthyEnvValue(process.env.PROPR_DEMO_MODE);
 
 // The mode inference lives in @propr/shared (resolveGithubAuthMode) so the CLI's
@@ -48,6 +54,8 @@ function resolveAuthMode(): GithubAuthMode {
         appId,
         privateKeyPath,
         installationId,
+        patToken,
+        patReadToken,
     });
     for (const warning of warnings) console.warn(`WARNING: ${warning}`);
     return mode;
@@ -109,10 +117,23 @@ if (authMode === 'relay') {
             }
         }
     }
-} else if (authMode === 'none' && process.env.NODE_ENV !== 'test') {
+} else if (authMode === 'pat') {
+    if (!patToken) {
+        fatalConfigError('ERROR: pat auth mode requires GH_PAT_TOKEN (the worker fine-grained PAT with write grants).');
+    }
+    else {
+        // Plain token auth — the PAT is long-lived, no refresh strategy needed.
+        appOctokit = new PaginatedOctokit({ auth: patToken });
+        if (!patReadToken) {
+            console.warn('WARNING: GH_PAT_READ_TOKEN is not set; agent containers will run without GitHub access.');
+        }
+    }
+}
+else if (authMode === 'none' && process.env.NODE_ENV !== 'test') {
     console.error('GitHub auth is not configured. Set one of:');
     console.error('  - GH_APP_ID + GH_INSTALLATION_ID + GH_PRIVATE_KEY_PATH (own GitHub App), or');
     console.error('  - PROPR_GH_RELAY_URL + PROPR_GH_RELAY_TOKEN (shared-app token relay), or');
+    console.error('  - GH_PAT_TOKEN (+ GH_PAT_READ_TOKEN) with GH_AUTH_MODE=pat (personal tokens), or');
     console.error('  - PROPR_DEMO_MODE=true (no GitHub access).');
     process.exit(1);
 }
@@ -167,6 +188,17 @@ export function validateGithubIntakePrerequisites(resolvedIntakeMode?: GithubEve
     });
     for (const warning of warnings) console.warn(`WARNING: ${warning}`);
     for (const error of errors) fatalConfigError(`ERROR: ${error}`);
+}
+
+/** The resolved auth mode, for code paths whose behavior must branch on it (e.g. agent token minting). */
+export function getGithubAuthMode(): typeof authMode {
+    return authMode;
+}
+
+/** The read-only token handed to agent containers in pat mode, or null in other modes. */
+export function getAgentGitHubReadToken(): string | null {
+    if (authMode === 'pat') return patReadToken ?? null;
+    return null;
 }
 
 export async function getGitHubInstallationToken(): Promise<string> {

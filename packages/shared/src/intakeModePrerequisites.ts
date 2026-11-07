@@ -63,7 +63,12 @@ export function validateIntakeModePrerequisites(
 
   switch (env.intakeMode) {
     case 'routing_websocket': {
-      if (env.authMode !== 'relay') {
+      if (env.authMode === 'pat') {
+        errors.push(
+          'routing_websocket intake requires relay auth mode. Set GITHUB_EVENT_INTAKE_MODE=polling for pat auth (no hosted relay involvement).',
+        );
+      }
+      else if (env.authMode !== 'relay') {
         errors.push(
           'routing_websocket intake requires relay auth mode. Set GH_AUTH_MODE=relay (or configure PROPR_GH_RELAY_URL + PROPR_GH_RELAY_TOKEN so relay mode is inferred).',
         );
@@ -91,17 +96,22 @@ export function validateIntakeModePrerequisites(
 
     case 'polling': {
       // Polling pulls events from the GitHub API, so any usable GitHub auth
-      // works — both the relay (shared-app) and app (own-app) paths qualify.
-      if (env.authMode !== 'relay' && env.authMode !== 'app') {
+      // works — relay (shared-app), app (own-app) and pat (personal tokens).
+      if (env.authMode !== 'relay' && env.authMode !== 'app' && env.authMode !== 'pat') {
         errors.push(
-          'polling intake requires usable GitHub auth. Configure relay mode (PROPR_GH_RELAY_URL + PROPR_GH_RELAY_TOKEN) or app mode (GH_APP_ID + GH_PRIVATE_KEY_PATH + GH_INSTALLATION_ID).',
+          'polling intake requires usable GitHub auth. Configure relay mode (PROPR_GH_RELAY_URL + PROPR_GH_RELAY_TOKEN), app mode (GH_APP_ID + GH_PRIVATE_KEY_PATH + GH_INSTALLATION_ID), or pat mode (GH_PAT_TOKEN [+ GH_PAT_READ_TOKEN]).',
         );
       }
       break;
     }
 
     case 'direct_webhook': {
-      if (env.authMode !== 'app') {
+      if (env.authMode === 'pat') {
+        errors.push(
+          'direct_webhook intake requires app auth mode (an own GitHub App). Use polling intake with pat auth instead.',
+        );
+      }
+      else if (env.authMode !== 'app') {
         errors.push(
           'direct_webhook intake requires app auth mode (an own GitHub App). Set GH_AUTH_MODE=app and configure GH_APP_ID + GH_PRIVATE_KEY_PATH + GH_INSTALLATION_ID.',
         );
