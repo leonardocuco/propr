@@ -275,6 +275,9 @@ async function promptMultiSelect(
  * so both renderers honour the same safe defaults: a blank input or a "keep"
  * choice leaves existing configuration untouched.
  */
+/** GitHub's fine-grained PAT creation page; supports template query parameters. */
+const FINE_GRAINED_PAT_URL = "https://github.com/settings/personal-access-tokens/new";
+
 export function buildSequentialPrompts(io: SequentialIo, paint: Paint = makePaint(false), createApp = createGithubApp): SetupPrompts {
   return {
     async resolveStackRoot({ currentRoot, init }): Promise<RootDecision> {
@@ -352,10 +355,30 @@ export function buildSequentialPrompts(io: SequentialIo, paint: Paint = makePain
         io.print("  PAT mode uses two fine-grained Personal Access Tokens instead of a GitHub App:");
         io.print("  1. The worker token carries the write grants (push, PRs, labels) and stays in ProPR.");
         io.print("  2. The agent token is read-only and is the only credential agent containers see.");
-        io.print("  Both must cover the monitored repos; agents can then read GitHub via 'gh', never write.");
-        io.print("  Pair pat mode with polling intake (offered next); both tokens share your 5,000 req/h limit.");
+        io.print("  Both must cover the monitored repos; pair pat mode with polling intake (next step).");
+        // GitHub supports template URLs that pre-fill every fine-grained PAT field
+        // (name, description, resource owner, expiry, permissions), so the user
+        // only reviews the form and picks the repositories.
+        const patWorkerUrl = `${FINE_GRAINED_PAT_URL}?name=${encodeURIComponent("ProPR worker (write)")}`
+            + `&description=${encodeURIComponent("ProPR worker token: push, pull requests, labels. Keep out of agent containers.")}`
+            + `&expires_in=90&contents=write&issues=write&pull_requests=write&statuses=write`;
+        const patReadUrl = `${FINE_GRAINED_PAT_URL}?name=${encodeURIComponent("ProPR agent reader (read-only)")}`
+            + `&description=${encodeURIComponent("ProPR agent token: read-only. The only credential agent containers receive.")}`
+            + `&expires_in=90&contents=read&issues=read&pull_requests=read`;
+        io.print("  Create the worker token (write grants pre-filled):");
+        io.print(`  ${patWorkerUrl}`);
+        io.print("  Then the agent token (read-only grants pre-filled):");
+        io.print(`  ${patReadUrl}`);
+        io.print("  On each page: pick the monitored repositories, then Generate and copy the token.");
+        io.print("  Note: tokens for an ORGANIZATION owner must have the org PAT policy enabled.");
         const patToken = await io.ask("  GH_PAT_TOKEN (worker, write): ", { mask: true });
         const patReadToken = await io.ask("  GH_PAT_READ_TOKEN (agent, read-only, blank = none): ", { mask: true });
+        if (patToken && !patToken.startsWith("github_pat_")) {
+            io.print("  WARNING: this does not look like a fine-grained token (github_pat_...). Classic tokens cannot be read-only.");
+        }
+        if (patReadToken && !patReadToken.startsWith("github_pat_")) {
+            io.print("  WARNING: the read token should be fine-grained (github_pat_...); classic tokens always carry write.");
+        }
         return {
           mode: "pat" satisfies GithubAuthMode,
           vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken },
