@@ -134,3 +134,23 @@ test('demo auth mode short-circuits with no errors for any intake mode', () => {
         assert.deepEqual(result.errors, []);
     }
 });
+
+test('polling accepts pat auth mode', () => {
+    const { valid, errors } = validateIntakeModePrerequisites({ intakeMode: 'polling', authMode: 'pat' });
+    assert.equal(valid, true);
+    assert.equal(errors.length, 0);
+});
+
+test('routing_websocket rejects pat auth mode with a pointed message', () => {
+    const { valid, errors } = validateIntakeModePrerequisites({ intakeMode: 'routing_websocket', authMode: 'pat' });
+    assert.equal(valid, false);
+    assert.match(errors.join(' '), /GITHUB_EVENT_INTAKE_MODE=polling/);
+});
+
+test('direct_webhook rejects pat auth mode', () => {
+    const { valid, errors } = validateIntakeModePrerequisites({
+        intakeMode: 'direct_webhook', authMode: 'pat', webhookSecret: 's',
+    });
+    assert.equal(valid, false);
+    assert.match(errors.join(' '), /polling/);
+});

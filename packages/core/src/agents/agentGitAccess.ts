@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { getAuthenticatedOctokit, type PaginatedOctokitInstance } from '../auth/githubAuth.js';
+import { getAgentGitHubReadToken, getAuthenticatedOctokit, getGithubAuthMode, type PaginatedOctokitInstance } from '../auth/githubAuth.js';
 import { loadMonitoredReposStrict } from '../config/configManager.js';
 import { assertGitHubRepositoryIdentity } from '../git/repositoryPaths.js';
 import type { AgentTaskOptions, AnalyzeOptions } from './types.js';
@@ -103,6 +103,22 @@ async function visibleClonePaths(root: string, repositories?: string[]): Promise
 
 /** The same scoped mint path is used by all adapters and the live boundary test. */
 export async function mintAgentGitHubToken(octokit: PaginatedOctokitInstance, writable = false, repositoryIds?: number[]): Promise<string> {
+    // PAT mode cannot mint scoped installation sub-tokens. The fine-grained
+    // read-only PAT plays the agent role; the worker PAT stays in the worker.
+    // Goal containers that own git need the write token, mirroring the
+    // installation-token grant they receive in relay/app modes.
+    if (getGithubAuthMode() === 'pat') {
+        if (writable) {
+            const writeToken = (await octokit.auth()) as { token?: string } | string;
+            return typeof writeToken === 'string' ? writeToken : writeToken.token ?? '';
+        }
+        const readToken = getAgentGitHubReadToken();
+        if (!readToken) {
+            console.warn('pat mode: GH_PAT_READ_TOKEN is not set; agent container will run without GitHub credentials.');
+            return '';
+        }
+        return readToken;
+    }
     // The unscoped worker token reports the installation's actual grants in both
     // own-App and relay mode. It is never passed to a read-only container.
     const granted = !writable ? (await octokit.auth({ type: 'installation' }) as { permissions?: Record<string, string> }).permissions : undefined;

@@ -6,10 +6,11 @@
  *   demo  — no GitHub access
  *   relay — fetch installation tokens from a vendor relay (shared-app path)
  *   app   — mint installation tokens locally from the App private key (own-app)
+ *   pat   — two fine-grained Personal Access Tokens (worker write, agent read)
  * An explicit GH_AUTH_MODE overrides the inference.
  */
 
-export type GithubAuthMode = 'demo' | 'relay' | 'app' | 'none';
+export type GithubAuthMode = 'demo' | 'relay' | 'app' | 'pat' | 'none';
 
 export interface GithubAuthModeEnv {
   /** Already-parsed PROPR_DEMO_MODE truthiness. */
@@ -21,6 +22,10 @@ export interface GithubAuthModeEnv {
   appId?: string;
   privateKeyPath?: string;
   installationId?: string;
+  /** Worker fine-grained PAT (contents/issues/pull-requests write). */
+  patToken?: string;
+  /** Agent-container fine-grained PAT (read-only). Optional: agents then get no GitHub access. */
+  patReadToken?: string;
 }
 
 export interface GithubAuthModeResult {
@@ -40,13 +45,27 @@ export function resolveGithubAuthMode(env: GithubAuthModeEnv): GithubAuthModeRes
   }
   if (explicit === 'relay') return { mode: 'relay', warnings };
   if (explicit === 'app') return { mode: 'app', warnings };
+  if (explicit === 'pat') {
+    if (!env.patToken) {
+      warnings.push('GH_AUTH_MODE=pat requires GH_PAT_TOKEN (the worker fine-grained PAT). Falling back to auto-detection.');
+    } else {
+      if (!env.patReadToken) {
+        warnings.push('GH_PAT_READ_TOKEN is not set: agent containers will run without GitHub access (ProPR pre-fetches issue context into prompts instead).');
+      }
+      return { mode: 'pat', warnings };
+    }
+  }
   if (explicit) {
-    warnings.push(`GH_AUTH_MODE="${env.ghAuthMode}" is not a recognized value (expected "app", "relay", or "demo"). Falling back to auto-detection.`);
+    warnings.push(`GH_AUTH_MODE="${env.ghAuthMode}" is not a recognized value (expected "app", "relay", "pat", or "demo"). Falling back to auto-detection.`);
   }
 
   // Inferred relay requires both URL and token so a stray placeholder URL
   // doesn't shadow a fully valid GitHub App configuration.
   if (env.relayUrl && env.relayToken) return { mode: 'relay', warnings };
   if (env.appId && env.privateKeyPath && env.installationId) return { mode: 'app', warnings };
+  if (env.patToken && env.patReadToken) return { mode: 'pat', warnings };
+  if (env.patToken && !env.patReadToken) {
+    warnings.push('GH_PAT_TOKEN is set without GH_PAT_READ_TOKEN: set GH_AUTH_MODE=pat explicitly to use PAT auth (agent containers will run without GitHub access).');
+  }
   return { mode: 'none', warnings };
 }

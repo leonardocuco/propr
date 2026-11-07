@@ -660,6 +660,8 @@ function resolveGithubAuthForCheck(env: Record<string, string>): ReturnType<type
     appId: val("GH_APP_ID"),
     privateKeyPath: val("HOST_GH_PRIVATE_KEY") || val("GH_PRIVATE_KEY_PATH"),
     installationId: val("GH_INSTALLATION_ID"),
+    patToken: val("GH_PAT_TOKEN"),
+    patReadToken: val("GH_PAT_READ_TOKEN"),
   });
 }
 
@@ -701,6 +703,29 @@ function checkGithubAuth(
       detail: "no GitHub auth configured — the backend will exit at startup",
       group: "GitHub",
       fix: "Set GH_APP_ID + GH_INSTALLATION_ID + a private key (own App), or PROPR_GH_RELAY_URL + PROPR_GH_RELAY_TOKEN (token relay), or PROPR_DEMO_MODE=true.",
+    });
+    return out;
+  }
+
+  if (mode === "pat") {
+    out.push({ name: "GitHub auth mode", status: "ok", detail: "personal access tokens (fine-grained, worker write + agent read)", group: "GitHub" });
+    const patToken = val("GH_PAT_TOKEN");
+    const patReadToken = val("GH_PAT_READ_TOKEN");
+    out.push(
+      !patToken
+        ? { name: "GH_PAT_TOKEN", status: "fail", detail: "missing", group: "GitHub", fix: "Set GH_PAT_TOKEN to a fine-grained PAT with contents/issues/pull-requests write on the monitored repos." }
+        : { name: "GH_PAT_TOKEN", status: "ok", detail: "set (worker write token)", group: "GitHub" }
+    );
+    out.push(
+      !patReadToken
+        ? { name: "GH_PAT_READ_TOKEN", status: "warn", detail: "not set — agent containers will run without GitHub access", group: "GitHub", fix: "Set GH_PAT_READ_TOKEN to a fine-grained PAT with read-only contents/issues/pull-requests." }
+        : { name: "GH_PAT_READ_TOKEN", status: "ok", detail: "set (agent read-only token)", group: "GitHub" }
+    );
+    out.push({
+      name: "PAT same-identity caveat",
+      status: "warn",
+      detail: "both tokens share the user identity: ProPR's own comments/labels arrive as you. Keep GITHUB_BOT_USERNAME at its default and rely on the AI-processing stale marker for trigger dedup.",
+      group: "GitHub",
     });
     return out;
   }

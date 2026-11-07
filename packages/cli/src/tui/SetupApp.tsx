@@ -24,6 +24,9 @@ import { createGithubApp, hasGithubAppCredentials, openGithubAppBrowser } from "
 import React, { useEffect, useReducer, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { DEFAULT_PROPR_GH_RELAY_URL, githubAppPublicUrl, type GithubAuthMode } from "@propr/shared";
+
+/** GitHub's fine-grained PAT creation page; supports template query parameters. */
+const FINE_GRAINED_PAT_URL = "https://github.com/settings/personal-access-tokens/new";
 import type { AuthorizedInstallation } from "../api/relay.js";
 import type {
   SetupPrompts,
@@ -274,6 +277,7 @@ export function buildSetupPrompts(bridge: SetupBridge, createApp = createGithubA
       }
       options.push({ label: "ProPR Connect (default ProPR GitHub App)", value: "relay" });
       options.push({ label: "Custom GitHub App (set up your own GitHub App)", value: "app" });
+      options.push({ label: "Personal access tokens (two fine-grained PATs, no GitHub App)", value: "pat" });
       const choice = await bridge.select({
         title: "GitHub authentication",
         detail: `Currently detected: ${current.mode}.`,
@@ -296,6 +300,37 @@ export function buildSetupPrompts(bridge: SetupBridge, createApp = createGithubA
           defaultValue: DEFAULT_PROPR_GH_RELAY_URL,
         });
         return { mode: "relay", enrollRelay: { relayUrl: relayUrl.trim() || DEFAULT_PROPR_GH_RELAY_URL } };
+      }
+      if (choice === "pat") {
+        bridge.emitLog("PAT mode uses two fine-grained Personal Access Tokens instead of a GitHub App:");
+        bridge.emitLog("1. The worker token carries the write grants (push, PRs, labels) and stays in ProPR.");
+        bridge.emitLog("2. The agent token is read-only and is the only credential agent containers see.");
+        bridge.emitLog("Both must cover the monitored repos; pair pat mode with polling intake (next step).");
+        // GitHub template URLs pre-fill every fine-grained PAT field; the user
+        // only picks the repositories and generates. See the changelog entry
+        // "Template URLs for fine-grained PATs" (2025-08-26).
+        const patWorkerUrl = `${FINE_GRAINED_PAT_URL}?name=${encodeURIComponent("ProPR worker (write)")}`
+            + `&description=${encodeURIComponent("ProPR worker token: push, pull requests, labels. Keep out of agent containers.")}`
+            + `&expires_in=90&contents=write&issues=write&pull_requests=write&statuses=write`;
+        const patReadUrl = `${FINE_GRAINED_PAT_URL}?name=${encodeURIComponent("ProPR agent reader (read-only)")}`
+            + `&description=${encodeURIComponent("ProPR agent token: read-only. The only credential agent containers receive.")}`
+            + `&expires_in=90&contents=read&issues=read&pull_requests=read`;
+        bridge.emitLog(`Worker token (write grants pre-filled): ${patWorkerUrl}`);
+        bridge.emitLog(`Agent token (read-only grants pre-filled): ${patReadUrl}`);
+        bridge.emitLog("On each page: pick the monitored repositories, then Generate and copy the token.");
+        bridge.emitLog("Note: tokens for an ORGANIZATION owner must have the org PAT policy enabled.");
+        const patToken = await bridge.input({ title: "GH_PAT_TOKEN (worker, write)", mask: true });
+        const patReadToken = await bridge.input({ title: "GH_PAT_READ_TOKEN (agent, read-only, blank = none)", mask: true });
+        if (patToken && !patToken.startsWith("github_pat_")) {
+            bridge.emitLog("WARNING: this does not look like a fine-grained token (github_pat_...). Classic tokens cannot be read-only.");
+        }
+        if (patReadToken && !patReadToken.startsWith("github_pat_")) {
+            bridge.emitLog("WARNING: the read token should be fine-grained (github_pat_...); classic tokens always carry write.");
+        }
+        return {
+          mode: "pat" satisfies GithubAuthMode,
+          vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken },
+        };
       }
       const method = await bridge.select({
         title: "Configure your own GitHub App",
