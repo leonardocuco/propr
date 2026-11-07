@@ -135,7 +135,7 @@ export const ALL_MODELS: ModelInfo[] = [...CLAUDE_MODELS, ...ENABLERS_MODELS, ..
 
 // Map of agent types to their models
 export const AGENT_MODELS: Record<AgentType, ModelInfo[]> = {
-  claude: [...CLAUDE_MODELS, ...ENABLERS_MODELS],
+  claude: CLAUDE_MODELS,
   codex: CODEX_MODELS,
   antigravity: ANTIGRAVITY_MODELS,
   opencode: OPENCODE_MODELS,
