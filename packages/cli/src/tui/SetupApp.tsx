@@ -327,9 +327,19 @@ export function buildSetupPrompts(bridge: SetupBridge, createApp = createGithubA
         if (patReadToken && !patReadToken.startsWith("github_pat_")) {
             bridge.emitLog("WARNING: the read token should be fine-grained (github_pat_...); classic tokens always carry write.");
         }
+        // Seed the instance administrator from the authenticated gh CLI login,
+        // mirroring what relay enrollment does for the shared App.
+        let adminUser = "";
+        try {
+            const { execFileSync } = await import("node:child_process");
+            adminUser = execFileSync("gh", ["api", "user", "--jq", ".login"], { encoding: "utf8" }).trim();
+            bridge.emitLog(`Instance administrator detected from gh CLI: ${adminUser}`);
+        } catch {
+            bridge.emitLog("Could not detect the GitHub login via gh; set PROPR_ADMIN_USERS in .env manually.");
+        }
         return {
           mode: "pat" satisfies GithubAuthMode,
-          vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken },
+          vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken, ...(adminUser ? { PROPR_ADMIN_USERS: adminUser } : {}) },
         };
       }
       const method = await bridge.select({
