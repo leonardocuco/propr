@@ -324,6 +324,7 @@ export function buildSequentialPrompts(io: SequentialIo, paint: Paint = makePain
       }
       options.push({ label: "ProPR Connect (default ProPR GitHub App)", value: "relay" });
       options.push({ label: "Custom GitHub App (set up your own GitHub App)", value: "app" });
+      options.push({ label: "Personal access tokens (two fine-grained PATs, no GitHub App)", value: "pat" });
       const choice = await promptSelect(io, paint, {
         title: "GitHub authentication",
         detail: `Currently detected: ${current.mode}.`,
@@ -346,6 +347,19 @@ export function buildSequentialPrompts(io: SequentialIo, paint: Paint = makePain
           defaultValue: DEFAULT_PROPR_GH_RELAY_URL,
         });
         return { mode: "relay", enrollRelay: { relayUrl: relayUrl.trim() || DEFAULT_PROPR_GH_RELAY_URL } };
+      }
+      if (choice === "pat") {
+        io.print("  PAT mode uses two fine-grained Personal Access Tokens instead of a GitHub App:");
+        io.print("  1. The worker token carries the write grants (push, PRs, labels) and stays in ProPR.");
+        io.print("  2. The agent token is read-only and is the only credential agent containers see.");
+        io.print("  Both must cover the monitored repos; agents can then read GitHub via 'gh', never write.");
+        io.print("  Pair pat mode with polling intake (offered next); both tokens share your 5,000 req/h limit.");
+        const patToken = await io.ask("  GH_PAT_TOKEN (worker, write): ", { mask: true });
+        const patReadToken = await io.ask("  GH_PAT_READ_TOKEN (agent, read-only, blank = none): ", { mask: true });
+        return {
+          mode: "pat" satisfies GithubAuthMode,
+          vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken },
+        };
       }
       const method = await promptSelect(io, paint, {
         title: "Configure your own GitHub App",

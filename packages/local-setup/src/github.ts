@@ -185,28 +185,34 @@ export interface IntakeModeOption {
 export function intakeModeOptions(authMode: GithubAuthMode): IntakeModeOption[] {
   const relay = authMode === "relay";
   const app = authMode === "app";
+  const pat = authMode === "pat";
+  const usableAuth = relay || app || pat;
   return [
     {
       mode: "routing_websocket",
       available: relay,
       note: relay
         ? undefined
-        : "needs the ProPR GitHub App (token relay); not available with a custom GitHub App",
+        : pat
+          ? "needs the ProPR GitHub App (token relay); use polling intake with personal access tokens"
+          : "needs the ProPR GitHub App (token relay); not available with a custom GitHub App",
     },
     {
       mode: "polling",
-      available: relay || app,
+      available: usableAuth,
       note:
-        relay || app
+        usableAuth
           ? "not recommended for production: subject to GitHub API rate limits and delayed event detection (depends on the polling interval and the number of repos/PRs/issues)"
-          : "needs usable GitHub auth — configure the token relay or a custom GitHub App first",
+          : "needs usable GitHub auth — configure the token relay, a custom GitHub App, or personal access tokens first",
     },
     {
       mode: "direct_webhook",
       available: app,
       note: app
         ? undefined
-        : "needs your own custom GitHub App; not available with the ProPR token relay",
+        : pat
+          ? "needs your own custom GitHub App; use polling intake with personal access tokens"
+          : "needs your own custom GitHub App; not available with the ProPR token relay",
     },
   ];
 }

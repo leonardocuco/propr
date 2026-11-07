@@ -274,6 +274,7 @@ export function buildSetupPrompts(bridge: SetupBridge, createApp = createGithubA
       }
       options.push({ label: "ProPR Connect (default ProPR GitHub App)", value: "relay" });
       options.push({ label: "Custom GitHub App (set up your own GitHub App)", value: "app" });
+      options.push({ label: "Personal access tokens (two fine-grained PATs, no GitHub App)", value: "pat" });
       const choice = await bridge.select({
         title: "GitHub authentication",
         detail: `Currently detected: ${current.mode}.`,
@@ -296,6 +297,18 @@ export function buildSetupPrompts(bridge: SetupBridge, createApp = createGithubA
           defaultValue: DEFAULT_PROPR_GH_RELAY_URL,
         });
         return { mode: "relay", enrollRelay: { relayUrl: relayUrl.trim() || DEFAULT_PROPR_GH_RELAY_URL } };
+      }
+      if (choice === "pat") {
+        bridge.emitLog("PAT mode uses two fine-grained Personal Access Tokens instead of a GitHub App:");
+        bridge.emitLog("1. The worker token carries the write grants (push, PRs, labels) and stays in ProPR.");
+        bridge.emitLog("2. The agent token is read-only and is the only credential agent containers see.");
+        bridge.emitLog("Both must cover the monitored repos; pair pat mode with polling intake (next step).");
+        const patToken = await bridge.input({ title: "GH_PAT_TOKEN (worker, write)", mask: true });
+        const patReadToken = await bridge.input({ title: "GH_PAT_READ_TOKEN (agent, read-only, blank = none)", mask: true });
+        return {
+          mode: "pat" satisfies GithubAuthMode,
+          vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken },
+        };
       }
       const method = await bridge.select({
         title: "Configure your own GitHub App",
