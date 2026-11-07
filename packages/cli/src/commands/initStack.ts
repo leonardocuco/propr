@@ -49,6 +49,22 @@ export function materializePackagedRuntimeMode(template: string): string {
   return template.replace(linePattern, "NODE_ENV=production");
 }
 
+/**
+ * The system-task secret signs worker->API requests for automation runs
+ * (agent-run MCP grants). An empty value scaffolds fine but makes every
+ * automation report/action run fail at grant time with
+ * "SYSTEM_TASK_SECRET is not configured on the worker", long after setup
+ * succeeded. Fill it when absent or empty; never overwrite a configured value.
+ */
+export function materializeSystemTaskSecret(
+  content: string,
+  secret: string = randomBytes(32).toString("hex"),
+): string {
+  const linePattern = /^SYSTEM_TASK_SECRET=[ \t]*$/m;
+  if (!linePattern.test(content)) return content;
+  return content.replace(linePattern, `SYSTEM_TASK_SECRET=${secret}`);
+}
+
 export interface DetectedCred {
   envKey: string;
   path: string;
@@ -143,6 +159,8 @@ export interface InitStackResult {
   pendingCredentials: DetectedCred[];
   /** Upgrade guidance for a preserved environment that cannot be migrated safely. */
   runtimeModeWarning?: string;
+  /** True when an empty SYSTEM_TASK_SECRET in a preserved .env was filled with a generated value. */
+  systemTaskSecretGenerated?: boolean;
 }
 
 export interface InitStackDependencies {
@@ -200,8 +218,13 @@ export async function scaffoldStack(
   let shouldWriteEnv = false;
   if (envExists && !options.force) {
     await secureExistingPrivateFile(envPath);
-    envContent = readFileSync(envPath, "utf-8");
-    result.envSkipped = true;
+    envContent = materializeSystemTaskSecret(readFileSync(envPath, "utf-8"));
+    if (envContent !== readFileSync(envPath, "utf-8")) {
+      shouldWriteEnv = true;
+      result.systemTaskSecretGenerated = true;
+    } else {
+      result.envSkipped = true;
+    }
     const nodeEnv = envContent.match(/^\s*(?:export\s+)?NODE_ENV\s*=\s*([^#\r\n]*)/m)?.[1]
       ?.trim()
       .replace(/^["']|["']$/g, "");
@@ -217,8 +240,10 @@ export async function scaffoldStack(
         "Could not locate .env.example. Run `npm run build` in packages/cli, or run from a ProPR source checkout."
       );
     }
-    envContent = materializePackagedRuntimeMode(
-      materializeSessionSecret(readFileSync(example, "utf-8")),
+    envContent = materializeSystemTaskSecret(
+      materializePackagedRuntimeMode(
+        materializeSessionSecret(readFileSync(example, "utf-8")),
+      ),
     );
     if (options.force && envExists) {
       await secureExistingPrivateFile(envPath);
