@@ -22,6 +22,10 @@ export interface AgentConfig {
     // Model configuration
     supportedModels: string[]; // List of models this agent supports
     defaultModel?: string;     // Default model if none specified
+    // When true, migrations must not inject default models into supportedModels:
+    // the configured list is authoritative (e.g. an agent whose config only
+    // serves provider-specific model ids).
+    strictSupportedModels?: boolean;
 
     // Environment variables to inject into container
     envVars?: Record<string, string>;
