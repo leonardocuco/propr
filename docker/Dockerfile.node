@@ -27,11 +27,24 @@ COPY packages/shared/package*.json ./packages/shared/
 COPY packages/local-setup/package*.json ./packages/local-setup/
 COPY packages/core/package*.json ./packages/core/
 COPY packages/api/package*.json ./packages/api/
+# Every workspace must be declared before `npm install`: a partial COPY changes
+# npm's hoisting, leaving runtime deps (e.g. multer) nested in
+# packages/api/node_modules where the compiled dist at /usr/src/app/dist cannot
+# resolve them.
+COPY packages/cli/package*.json ./packages/cli/
+COPY packages/client/package*.json ./packages/client/
+# Remaining workspaces (apps/*, propr-ui) must also be present before install:
+# a partial workspace set changes npm's hoisting and leaves runtime deps nested
+# where the compiled dist cannot resolve them.
+COPY apps/*/package*.json ./apps/
+COPY propr-ui/package*.json ./propr-ui/
 # Vendored braces tarball referenced by the root package.json overrides
 COPY vendor ./vendor
 
-# Install all dependencies (including dev for TypeScript compilation)
-RUN npm install
+# Install all dependencies (including dev for TypeScript compilation).
+# npm ci (not install) reproduces the committed lockfile tree exactly, so the
+# hoisting matches the host development layout.
+RUN npm ci
 
 # Copy application code
 COPY . .
@@ -47,6 +60,14 @@ RUN cd packages/core && npm run build
 
 # Build TypeScript (main app)
 RUN npm run build
+
+# Merge workspace-local node_modules into the root tree: the compiled dist lives
+# at /usr/src/app/dist (not packages/*/dist), so Node's resolution for
+# dist/packages/api/routes/*.js never reaches packages/api/node_modules. The
+# lockfile legitimately nests some runtime deps (e.g. multer) there.
+RUN for d in packages/*/node_modules; do \
+      [ -d "$d" ] && cp -a "$d"/. node_modules/ || true; \
+    done
 
 # Create necessary directories. Worktrees are chowned for agent containers, so
 # Git must trust everything under ProPR's folders, also after a restart.
