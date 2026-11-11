@@ -80,6 +80,30 @@ function findAgentByType(agentType: AgentType, agents: { config: AgentConfig }[]
     return agents.find(a => a.config.type === agentType && a.config.enabled) || agents.find(a => a.config.type === agentType) || null;
 }
 
+/**
+ * Picks the agent that can actually serve a catalog model.
+ *
+ * Multiple instances of one agent type may exist (e.g. a native claude agent
+ * plus an Enablers-routed one). Only an enabled agent of the model's own type
+ * that lists the model in its supportedModels can serve it. When some agent
+ * lists the model but no enabled same-type agent does, return null — falling
+ * back to the type default would target a config that rejects the id and
+ * guarantees a run failure. When no agent lists the model at all, keep the
+ * legacy type-based pick.
+ */
+function findAgentServingModel(
+    agentType: AgentType,
+    modelId: string,
+    agents: { config: AgentConfig }[]
+): { config: AgentConfig } | null {
+    const listingAgents = agents.filter(a => Array.isArray(a.config.supportedModels)
+        && a.config.supportedModels.some(m => m.toLowerCase() === modelId.toLowerCase()));
+    const supportingAgent = listingAgents.find(a => a.config.enabled && a.config.type === agentType);
+    if (supportingAgent) return supportingAgent;
+    if (listingAgents.length > 0) return null;
+    return findAgentByType(agentType, agents);
+}
+
 function resolveByGithubLabel(fullLabel: string, agents: { config: AgentConfig }[]): LlmLabelResolution | null {
     const compatibility = ANTIGRAVITY_COMPATIBILITY_ALIASES[fullLabel.replace(/^llm-/, '')];
     if (compatibility) {
@@ -94,8 +118,9 @@ function resolveByGithubLabel(fullLabel: string, agents: { config: AgentConfig }
     for (const modelInfo of ALL_MODELS) {
         if (modelInfo.githubLabel.toLowerCase() === fullLabel) {
             const agentType = getAgentTypeFromModel(modelInfo.id);
-            const agent = findAgentByType(agentType, agents);
-            return { agentAlias: agent?.config.alias || agentType, model: modelInfo.id };
+            const agent = findAgentServingModel(agentType, modelInfo.id, agents);
+            if (!agent) return null;
+            return { agentAlias: agent.config.alias, model: modelInfo.id };
         }
     }
     return null;
@@ -251,8 +276,9 @@ function resolveStaticModelAliasLabel(lowerLabel: string, agents: { config: Agen
     if (!model) return null;
 
     const agentType = getAgentTypeFromModel(model);
-    const agent = findAgentByType(agentType, agents);
-    return { agentAlias: agent?.config.alias || agentType, model };
+    const agent = findAgentServingModel(agentType, model, agents);
+    if (!agent) return null;
+    return { agentAlias: agent.config.alias, model };
 }
 
 function resolveKnownModelAliasLabel(label: string, agents: { config: AgentConfig }[]): LlmLabelResolution | null {
@@ -260,8 +286,9 @@ function resolveKnownModelAliasLabel(label: string, agents: { config: AgentConfi
     if (resolvedModel === label) return null;
 
     const agentType = getAgentTypeFromModel(resolvedModel);
-    const agent = findAgentByType(agentType, agents);
-    return { agentAlias: agent?.config.alias || agentType, model: resolvedModel };
+    const agent = findAgentServingModel(agentType, resolvedModel, agents);
+    if (!agent) return null;
+    return { agentAlias: agent.config.alias, model: resolvedModel };
 }
 
 /**

@@ -42,6 +42,7 @@ import {
   type GithubIntakeMode,
 } from "../commands/setup/github.js";
 import type { SetupState, SetupStep, SetupStepStatus } from "../commands/setup/types.js";
+import { readOAuthAppSetup } from "../commands/setup/oauthAppSetup.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MAX_LOG_LINES = 8;
@@ -337,9 +338,24 @@ export function buildSetupPrompts(bridge: SetupBridge, createApp = createGithubA
         } catch {
             bridge.emitLog("Could not detect the GitHub login via gh; set PROPR_ADMIN_USERS in .env manually.");
         }
+        // Browser sign-in for the dashboard needs a GitHub OAuth App (identity
+        // only: the CLI/API operate with the PATs). Mirrors the sequential
+        // wizard's step one-for-one via the shared readOAuthAppSetup helper.
+        const oauthSetup = readOAuthAppSetup(rootDir);
+        bridge.emitLog("Browser sign-in for the dashboard needs a GitHub OAuth App (identity only, no org access):");
+        bridge.emitLog(`Create it (form pre-filled): ${oauthSetup.creationUrl}`);
+        bridge.emitLog("Then generate a client secret on the app page. Shared installs: one app per team is enough.");
+        const oauthClientId = (await bridge.input({ title: "GH_OAUTH_CLIENT_ID (blank = skip browser sign-in)" })).trim();
+        let oauthVars: Record<string, string> = {};
+        if (oauthClientId) {
+            const oauthClientSecret = await bridge.input({ title: "GH_OAUTH_CLIENT_SECRET", mask: true });
+            oauthVars = oauthSetup.envVars(oauthClientId, oauthClientSecret);
+        } else {
+            bridge.emitLog("Skipped: the dashboard will show 'Browser sign-in is not configured' until an OAuth App is set.");
+        }
         return {
           mode: "pat" satisfies GithubAuthMode,
-          vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken, ...(adminUser ? { PROPR_ADMIN_USERS: adminUser } : {}) },
+          vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken, ...(adminUser ? { PROPR_ADMIN_USERS: adminUser } : {}), ...oauthVars },
         };
       }
       const method = await bridge.select({

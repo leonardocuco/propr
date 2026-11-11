@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -13,7 +14,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { materializePackagedRuntimeMode, scaffoldStack } from "./initStack.js";
+import {
+  materializePackagedRuntimeMode,
+  materializeSystemTaskSecret,
+  pinCredentialEncryptionKey,
+  scaffoldStack,
+} from "./initStack.js";
 
 function mode(targetPath: string): number {
   return lstatSync(targetPath).mode & 0o777;
@@ -33,7 +39,14 @@ test("stack scaffolding tightens existing secrets and local state directories", 
       { persistStackRoot: async value => { persistedRoot = value; } },
     );
 
-    assert.equal(result.envSkipped, true);
+    // The .env has no SYSTEM_TASK_SECRET line, so it is seeded in place
+    // (with a .bak backup) while staying otherwise user-managed.
+    assert.equal(result.systemTaskSecretGenerated, true);
+    assert.equal(result.envCreated, false);
+    assert.equal(result.envBackedUp, true);
+    assert.equal(existsSync(join(root, ".env.bak")), true);
+    assert.match(readFileSync(join(root, ".env"), "utf-8"), /^SESSION_SECRET=secret$/m);
+    assert.match(readFileSync(join(root, ".env"), "utf-8"), /^SYSTEM_TASK_SECRET=[0-9a-f]{64}$/m);
     assert.equal(persistedRoot, root);
     assert.equal(mode(root), 0o700);
     assert.equal(mode(join(root, ".env")), 0o600);
@@ -142,10 +155,84 @@ test("stack scaffolding preserves an existing runtime mode and surfaces upgrade 
       { persistStackRoot: async () => undefined },
     );
 
-    assert.equal(result.envSkipped, true);
-    assert.equal(readFileSync(join(root, ".env"), "utf-8"), existing);
+    // A preserved .env without a SYSTEM_TASK_SECRET line gets the secret
+    // seeded (appended); every other line and the runtime-mode guidance stay.
+    assert.equal(result.systemTaskSecretGenerated, true);
+    assert.equal(result.envCreated, false);
+    assert.equal(result.envBackedUp, true);
+    const updated = readFileSync(join(root, ".env"), "utf-8");
+    assert.match(updated, /^SESSION_SECRET=user-managed$/m);
+    assert.match(updated, /^NODE_ENV=development$/m);
+    assert.match(updated, /^SYSTEM_TASK_SECRET=[0-9a-f]{64}$/m);
+    assert.equal(readFileSync(join(root, ".env.bak"), "utf-8"), existing);
     assert.match(result.runtimeModeWarning ?? "", /change it manually before starting/);
     assert.match(result.runtimeModeWarning ?? "", /NODE_ENV=development/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("stack scaffolding pins the credential-encryption key when seeding a preserved .env", async () => {
+  const root = mkdtempSync(join(tmpdir(), "propr-private-stack-"));
+  try {
+    // No SYSTEM_TASK_SECRET line and no explicit encryption key: the effective
+    // key was SESSION_SECRET, so seeding SYSTEM_TASK_SECRET must pin it.
+    const existing = "SESSION_SECRET=keep-me-decryptable\nNODE_ENV=production\n";
+    writeFileSync(join(root, ".env"), existing);
+
+    const result = await scaffoldStack(
+      { root },
+      { persistStackRoot: async () => undefined },
+    );
+
+    assert.equal(result.systemTaskSecretGenerated, true);
+    const updated = readFileSync(join(root, ".env"), "utf-8");
+    assert.match(updated, /^PROPR_CREDENTIAL_ENCRYPTION_KEY=keep-me-decryptable$/m);
+    assert.match(updated, /^SYSTEM_TASK_SECRET=[0-9a-f]{64}$/m);
+    assert.doesNotMatch(updated, /HOST_CLAUDE_DIR=/);
+    assert.equal(result.credentialsAppended, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("stack scaffolding does not pin the encryption key when one is already explicit", async () => {
+  const root = mkdtempSync(join(tmpdir(), "propr-private-stack-"));
+  try {
+    const existing = "PROPR_CREDENTIAL_ENCRYPTION_KEY=explicit-key\nSESSION_SECRET=session\nSYSTEM_TASK_SECRET=\n";
+    writeFileSync(join(root, ".env"), existing);
+
+    const result = await scaffoldStack(
+      { root },
+      { persistStackRoot: async () => undefined },
+    );
+
+    assert.equal(result.systemTaskSecretGenerated, true);
+    const updated = readFileSync(join(root, ".env"), "utf-8");
+    assert.match(updated, /^PROPR_CREDENTIAL_ENCRYPTION_KEY=explicit-key$/m);
+    assert.match(updated, /^SYSTEM_TASK_SECRET=[0-9a-f]{64}$/m);
+    assert.equal(updated.match(/^PROPR_CREDENTIAL_ENCRYPTION_KEY=/gm)?.length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("stack scaffolding keeps a preserved .env fully untouched when nothing needs seeding", async () => {
+  const root = mkdtempSync(join(tmpdir(), "propr-private-stack-"));
+  try {
+    const existing = "SESSION_SECRET=user-managed\nSYSTEM_TASK_SECRET=already-set\nNODE_ENV=production\n";
+    writeFileSync(join(root, ".env"), existing);
+
+    const result = await scaffoldStack(
+      { root },
+      { persistStackRoot: async () => undefined },
+    );
+
+    assert.equal(result.envSkipped, true);
+    assert.equal(result.systemTaskSecretGenerated, undefined);
+    assert.equal(result.envBackedUp, false);
+    assert.equal(existsSync(join(root, ".env.bak")), false);
+    assert.equal(readFileSync(join(root, ".env"), "utf-8"), existing);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -174,4 +261,38 @@ test("stack scaffolding rejects symlinked secrets and state directories", async 
     rmSync(root, { recursive: true, force: true });
     rmSync(external, { recursive: true, force: true });
   }
+});
+
+test("materializeSystemTaskSecret fills every empty shape and appends a missing line", () => {
+  const secret = materializeSystemTaskSecret("SYSTEM_TASK_SECRET=", "s3cret");
+  assert.equal(secret, "SYSTEM_TASK_SECRET=s3cret");
+  assert.equal(materializeSystemTaskSecret('SYSTEM_TASK_SECRET=""', "s3cret"), "SYSTEM_TASK_SECRET=s3cret");
+  assert.equal(materializeSystemTaskSecret("SYSTEM_TASK_SECRET=\r\nOTHER=1", "s3cret"), "SYSTEM_TASK_SECRET=s3cret\nOTHER=1");
+  assert.equal(
+    materializeSystemTaskSecret("SESSION_SECRET=x\nOTHER=1", "s3cret"),
+    "SESSION_SECRET=x\nOTHER=1\nSYSTEM_TASK_SECRET=s3cret\n",
+  );
+  // A configured value is never overwritten.
+  assert.equal(materializeSystemTaskSecret("SYSTEM_TASK_SECRET=configured", "s3cret"), "SYSTEM_TASK_SECRET=configured");
+  assert.equal(materializeSystemTaskSecret('SYSTEM_TASK_SECRET="configured"', "s3cret"), 'SYSTEM_TASK_SECRET="configured"');
+});
+
+test("pinCredentialEncryptionKey only pins when the effective key would rotate", () => {
+  // No explicit key: SESSION_SECRET was the effective key and must be pinned.
+  assert.equal(
+    pinCredentialEncryptionKey("SESSION_SECRET=old\nSYSTEM_TASK_SECRET=new\n"),
+    "SESSION_SECRET=old\nSYSTEM_TASK_SECRET=new\nPROPR_CREDENTIAL_ENCRYPTION_KEY=old\n",
+  );
+  // An empty explicit-key line is filled instead of appended.
+  assert.equal(
+    pinCredentialEncryptionKey("SESSION_SECRET=old\nPROPR_CREDENTIAL_ENCRYPTION_KEY=\n"),
+    "SESSION_SECRET=old\nPROPR_CREDENTIAL_ENCRYPTION_KEY=old\n",
+  );
+  // Explicit key set: nothing to do.
+  assert.equal(
+    pinCredentialEncryptionKey("PROPR_CREDENTIAL_ENCRYPTION_KEY=explicit\nSESSION_SECRET=old\n"),
+    "PROPR_CREDENTIAL_ENCRYPTION_KEY=explicit\nSESSION_SECRET=old\n",
+  );
+  // No SESSION_SECRET: the chain could never encrypt anything, so no pin.
+  assert.equal(pinCredentialEncryptionKey("SYSTEM_TASK_SECRET=new\n"), "SYSTEM_TASK_SECRET=new\n");
 });

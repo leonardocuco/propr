@@ -32,7 +32,7 @@ export { buildAnalysisSafetySuffix } from './agents/impl/utils/analysisPromptSaf
 export { sanitizeAgentReport } from './agents/agentReportSanitizer.js';
 export { resolveEffectiveContextRepositories } from './agents/agentGitAccess.js';
 export { formatResetTime, addModelSpecificDelay, parseResetTimeFromMessage, calculateNextRoundHourPlus2Minutes, formatRetryTime, hoursUntil } from './utils/scheduling.js';
-export { filterCommentByAuthor, checkCommentTrigger, checkCommentIgnore } from './utils/commentFilters.js';
+export { filterCommentByAuthor, checkCommentTrigger, checkCommentIgnore, isProprSystemCommentBody } from './utils/commentFilters.js';
 export { ensureGitRepository } from './utils/git/gitValidation.js';
 export { safeRemoveLabel, safeAddLabel, safeUpdateLabels } from './utils/github/labelOperations.js';
 export type { LabelContext, UpdateResults } from './utils/github/labelOperations.js';

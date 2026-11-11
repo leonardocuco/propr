@@ -51,6 +51,17 @@ export const CLAUDE_MODELS: ModelInfo[] = [
   { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', shortName: 'Claude Haiku 4.5', shortAlias: 'haiku45', githubLabel: 'llm-claude-haiku45', contextWindow: '200K', maxTokens: 200000, openRouterId: 'anthropic/claude-haiku-4.5' },
 ];
 
+// Algolia Enablers gateway models. These ids are only valid when the agent's
+// config routes Claude Code through the Enablers edge router (ANTHROPIC_BASE_URL
+// + auth token in the agent's config dir); a native Anthropic API endpoint
+// rejects them. They are listed in the shared catalog so agent migrations keep
+// them and the UI can render names, context windows and GitHub labels.
+export const ENABLERS_MODELS: ModelInfo[] = [
+  { id: 'enablers/xlarge', name: 'Enablers XLarge', shortName: 'Enablers XLarge', shortAlias: 'xl', githubLabel: 'llm-enablers-xl', contextWindow: '1M', maxTokens: 1000000, openRouterId: 'enablers/xlarge' },
+  { id: 'enablers/large', name: 'Enablers Large', shortName: 'Enablers Large', shortAlias: 'lg', githubLabel: 'llm-enablers-lg', contextWindow: '256K', maxTokens: 262144, openRouterId: 'enablers/large' },
+  { id: 'd3', name: 'Enablers D3', shortName: 'Enablers D3', shortAlias: 'd3', githubLabel: 'llm-enablers-d3', contextWindow: '256K', maxTokens: 262144, openRouterId: 'enablers/d3' },
+];
+
 // Codex (OpenAI) models - availability depends on account type (ChatGPT login vs API key)
 // Recommended: gpt-6-astra (default), gpt-6.1-sol (balanced), gpt-6-luna (fast/low-cost)
 export const CODEX_MODELS: ModelInfo[] = [
@@ -120,11 +131,15 @@ export const VIBE_MODELS: ModelInfo[] = [
 ];
 
 // All models combined
-export const ALL_MODELS: ModelInfo[] = [...CLAUDE_MODELS, ...CODEX_MODELS, ...ANTIGRAVITY_MODELS, ...OPENCODE_MODELS, ...VIBE_MODELS];
+export const ALL_MODELS: ModelInfo[] = [...CLAUDE_MODELS, ...ENABLERS_MODELS, ...CODEX_MODELS, ...ANTIGRAVITY_MODELS, ...OPENCODE_MODELS, ...VIBE_MODELS];
 
-// Map of agent types to their models
+// Map of agent types to their models. The Enablers gateway ids are served by
+// claude-type agents (an Enablers-routed Claude config), so they belong to the
+// claude family for attribution, UI pickers and label building. They
+// deliberately stay OUT of AGENT_DEFAULTS.claude.defaultModels below: default
+// model injection must never add ids a native Anthropic endpoint rejects.
 export const AGENT_MODELS: Record<AgentType, ModelInfo[]> = {
-  claude: CLAUDE_MODELS,
+  claude: [...CLAUDE_MODELS, ...ENABLERS_MODELS],
   codex: CODEX_MODELS,
   antigravity: ANTIGRAVITY_MODELS,
   opencode: OPENCODE_MODELS,

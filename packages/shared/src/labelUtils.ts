@@ -56,6 +56,16 @@ export function buildAgentModelLlmLabel(
         return buildDynamicLlmLabel(effectiveAlias, model.id);
     }
 
+    // Gateway models (e.g. the Enablers ids) are served by claude-type agents
+    // but their static label carries no agent-type prefix. Rewriting it per
+    // alias would leave every instance publishing the same shared label, so
+    // issue a dynamic per-alias label instead — the `alias~model` form stays
+    // resolvable through the explicit agent:model path. Legacy `llm-enablers-*`
+    // labels already attached to issues still resolve via the static catalog.
+    if (model.githubLabel.startsWith('llm-enablers-')) {
+        return buildDynamicLlmLabel(effectiveAlias, model.id);
+    }
+
     const staticPrefix = `llm-${agentType}-`;
     if (model.githubLabel.startsWith(staticPrefix)) {
         const staticLabel = `llm-${effectiveAlias}-${model.githubLabel.slice(staticPrefix.length)}`;

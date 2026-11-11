@@ -87,6 +87,13 @@ function addMissingModels(agent: AgentConfig, models: string[], logMessage: stri
         return false;
     }
 
+    // strictSupportedModels marks the list as authoritative: default-model
+    // injection would re-add provider models the agent's config cannot serve
+    // (e.g. Anthropic ids on an Enablers-routed agent).
+    if (agent.strictSupportedModels) {
+        return false;
+    }
+
     const missingModels = models.filter(m => !agent.supportedModels.includes(m));
     if (missingModels.length === 0) {
         return false;

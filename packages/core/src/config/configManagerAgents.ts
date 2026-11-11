@@ -36,6 +36,10 @@ export interface AgentConfig {
     configPath: string;
     supportedModels: string[];
     defaultModel?: string;
+    // When true, migrations must not inject default models into supportedModels:
+    // the configured list is authoritative (e.g. an agent whose config only
+    // serves provider-specific model ids).
+    strictSupportedModels?: boolean;
     envVars?: Record<string, string>;
     modelCustomLabels?: Record<string, string>;
     /** Per-model reasoning levels. Values override the system setting for this agent/model. */

@@ -43,6 +43,7 @@ import {
   type SetupRunResult,
 } from "./engine.js";
 import type { SetupStepStatus } from "./types.js";
+import { readOAuthAppSetup } from "./oauthAppSetup.js";
 
 // ---------------------------------------------------------------------------
 // I/O seam.
@@ -392,9 +393,26 @@ export function buildSequentialPrompts(io: SequentialIo, paint: Paint = makePain
         } catch {
             adminUser = await io.ask("  Could not detect via gh. GitHub username for the instance administrator: ");
         }
+        // Browser sign-in for the dashboard needs a GitHub OAuth App (identity
+        // only: the CLI/API operate with the PATs). Identity-only scopes keep
+        // restricted organizations out of the flow — no admin approval.
+        // Pre-fill GitHub's creation form (name, homepage, callback).
+        const oauthSetup = readOAuthAppSetup(rootDir);
+        io.print("");
+        io.print("  Browser sign-in for the dashboard needs a GitHub OAuth App (identity only, no org access):");
+        io.print(`  Create it (form pre-filled): ${oauthSetup.creationUrl}`);
+        io.print("  Then generate a client secret on the app page. Shared installs: one app per team is enough.");
+        const oauthClientId = (await io.ask("  GH_OAUTH_CLIENT_ID (blank = skip browser sign-in): ")).trim();
+        let oauthVars: Record<string, string> = {};
+        if (oauthClientId) {
+            const oauthClientSecret = await io.ask("  GH_OAUTH_CLIENT_SECRET: ", { mask: true });
+            oauthVars = oauthSetup.envVars(oauthClientId, oauthClientSecret);
+        } else {
+            io.print("  Skipped: the dashboard will show 'Browser sign-in is not configured' until an OAuth App is set.");
+        }
         return {
           mode: "pat" satisfies GithubAuthMode,
-          vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken, ...(adminUser ? { PROPR_ADMIN_USERS: adminUser } : {}) },
+          vars: { PROPR_DEMO_MODE: "false", GH_AUTH_MODE: "pat", GH_PAT_TOKEN: patToken, GH_PAT_READ_TOKEN: patReadToken, ...(adminUser ? { PROPR_ADMIN_USERS: adminUser } : {}), ...oauthVars },
         };
       }
       const method = await promptSelect(io, paint, {
