@@ -22,6 +22,21 @@ interface TriggerResult {
 }
 
 /**
+ * Whether a comment body is one of ProPR's own system comments.
+ *
+ * Every comment ProPR publishes embeds a hidden machine marker (`<!-- propr-…`
+ * handoff/delivery markers, `<!-- propr:…` work-evidence/accepted-request
+ * markers). In PAT mode those comments are authored by the PAT's own login —
+ * the same account a human operator comments with — so author-based filters
+ * cannot tell them apart. Marker-based detection can: a comment carrying a
+ * ProPR marker was posted by ProPR and must never be treated as a follow-up
+ * trigger, regardless of its author or the pull request's processing labels.
+ */
+export function isProprSystemCommentBody(body: string | null | undefined): boolean {
+    return typeof body === 'string' && body.includes('<!-- propr');
+}
+
+/**
  * Check if a comment should be filtered out based on author
  * @param commentAuthor - The comment author's username
  * @param userType - The user type (e.g., 'Bot', 'User') - optional

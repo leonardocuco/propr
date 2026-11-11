@@ -3,7 +3,7 @@ import { antigravitySupportedModel } from '../agents/impl/antigravityModelIds.js
 import logger, { generateCorrelationId } from '../utils/logger.js';
 import { handleError } from '../utils/errorHandler.js';
 import { getIssueQueue, COMMENT_BATCH_DELAY_MS, type CommentJobData, type UnprocessedComment } from '../queue/taskQueue.js';
-import { filterCommentByAuthor, checkCommentTrigger, checkCommentIgnore } from '../utils/commentFilters.js';
+import { filterCommentByAuthor, checkCommentTrigger, checkCommentIgnore, isProprSystemCommentBody } from '../utils/commentFilters.js';
 import { loadFollowupIgnoreKeywords, hasValidTriggerLabel } from '../config/configManager.js';
 import { getAuthenticatedOctokit } from '../auth/githubAuth.js';
 import { getPendingPrCommentsKey } from '../utils/constants.js';
@@ -864,6 +864,16 @@ export async function processCommentEvent(payload: IssueCommentEvent | PullReque
     const filterResult = filterCommentByAuthor(commentAuthor, comment.user.type ?? null, correlationId);
     if (shouldFilterSystemComment(filterResult.shouldFilter, isSystemUltrafixComment, isSystemCiFollowupComment)) {
         return { status: 'ignored', reason: 'filtered_author' };
+    }
+
+    // ProPR's own comments embed a hidden `<!-- propr…` marker and are authored
+    // by the PAT login in PAT mode (the operator's own account), so the author
+    // filter cannot reject them. Without this skip, every notice ProPR posts
+    // re-triggers processing and the pull request enters a self-activation
+    // loop. Marker-carrying comments are never slash commands, so skipping
+    // before command parsing is safe.
+    if (!isSystemUltrafixComment && !isSystemCiFollowupComment && isProprSystemCommentBody(comment.body)) {
+        return { status: 'ignored', reason: 'propr_system_comment' };
     }
 
     // Check for ignore keywords

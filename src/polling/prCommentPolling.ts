@@ -2,7 +2,7 @@ import { logger } from '@propr/core';
 import { generateCorrelationId } from '@propr/core';
 import { handleError } from '@propr/core';
 import { getIssueQueue, COMMENT_BATCH_DELAY_MS, type CommentJobData, type UnprocessedComment } from '@propr/core';
-import { filterCommentByAuthor, checkCommentTrigger } from '@propr/core';
+import { filterCommentByAuthor, checkCommentTrigger, isProprSystemCommentBody } from '@propr/core';
 import { extractLlmFromLabels, resolveModelAlias } from '@propr/core';
 import { hasValidTriggerLabel, wasRefused } from '@propr/core';
 import { getCheckRunsStatusForRepo, getCurrentPRHead, triggerUltrafixCheckRunHook } from '@propr/core';
@@ -274,6 +274,13 @@ async function collectUnprocessedComments(
         const commentAuthor = comment.user.login;
         const filterResult = filterCommentByAuthor(commentAuthor, correlationId);
         if (filterResult.shouldFilter) continue;
+
+        // ProPR's own comments (handoff notices, status updates, review results)
+        // embed a hidden `<!-- propr…` marker. In PAT mode they are authored by
+        // the operator's own login, so the author filter above cannot reject
+        // them; without this skip each posted notice re-triggers processing and
+        // the pull request enters a self-activation loop.
+        if (isProprSystemCommentBody(comment.body)) continue;
 
         // Check trigger: PR must have a processing label OR comment must contain trigger keyword
         const triggerResult = checkCommentTrigger(comment.body || '', correlationId);
